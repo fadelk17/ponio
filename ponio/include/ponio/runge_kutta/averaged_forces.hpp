@@ -11,7 +11,7 @@
 #include <type_traits>
 
 #include "../linear_algebra.hpp"
-#include "../rkc.hpp"
+#include "rkc.hpp"
 
 namespace ponio::runge_kutta::chebyshev
 {
@@ -82,8 +82,9 @@ namespace ponio::runge_kutta::chebyshev
         void
         averaged_force_order_1( problem_t& pb, value_t t, state_t& y, array_ki_t& U, std::size_t m, value_t eta, value_t eps, state_t& f_bar )
         {
-            using fast_op = std::integral_constant<std::size_t, 0>;
-            using slow_op = std::integral_constant<std::size_t, 1>;
+            using fast_op         = std::integral_constant<std::size_t, 0>;
+            using slow_op         = std::integral_constant<std::size_t, 1>;
+            using state_algebra_t = ::ponio::linear_algebra::state_algebra<state_t>;
 
             auto& micro_kjm2  = U[4];
             auto& micro_kjm1  = U[5];
@@ -97,7 +98,7 @@ namespace ponio::runge_kutta::chebyshev
             auto auxiliary_rhs = [&]( value_t r, state_t& u, state_t& du )
             {
                 pb( fast_op(), r, u, du );
-                du += slow_frozen;
+                state_algebra_t::add( du, slow_frozen );
             };
 
             rkc_detail::rkc1_step( auxiliary_rhs, t, y, eta, m, eps, micro_kjm2, micro_kjm1, micro_kj, micro_f_tmp, u_eta );

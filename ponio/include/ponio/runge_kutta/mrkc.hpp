@@ -377,10 +377,10 @@ namespace ponio::runge_kutta::chebyshev
             success ? ++st.accepted : ++st.rejected;
             st.s_min = std::min( st.s_min, dim.s );
             st.s_max = std::max( st.s_max, dim.s );
-            st.s_sum += dim.s;
+            st.s_sum += static_cast<long double>( dim.s );
             st.m_min = std::min( st.m_min, dim.m );
             st.m_max = std::max( st.m_max, dim.m );
-            st.m_sum += dim.m;
+            st.m_sum += static_cast<long double>( dim.m );
             st.eta_min = std::min( st.eta_min, dim.eta );
             st.eta_max = std::max( st.eta_max, dim.eta );
             st.eta_sum += dim.eta;
