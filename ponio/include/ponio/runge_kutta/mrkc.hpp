@@ -205,7 +205,7 @@ namespace ponio::runge_kutta::chebyshev
 
         using value_t                        = _value_t;
         using dimensioning_t                 = mrkc_detail::mrkc_dimensioning<value_t>;
-        static constexpr value_t default_eps = explicit_rkc1<value_t>::default_eps;
+        static constexpr value_t default_eps = rkc1_default_eps<value_t>;
 
         struct runtime_stats
         {

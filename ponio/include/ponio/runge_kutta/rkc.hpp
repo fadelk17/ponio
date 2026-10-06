@@ -1,3 +1,4 @@
+
 // Copyright 2022 PONIO TEAM. All rights reserved.
 // Use of this source code is governed by a BSD-style
 // license that can be found in the LICENSE file.
@@ -505,14 +506,18 @@ namespace ponio::runge_kutta::chebyshev
         }
     } // namespace rkc_detail
 
+    template <typename value_t>
+    inline constexpr value_t rkc1_default_eps = static_cast<value_t>( 0.05 );
+
     /**
      * @brief First-order explicit Runge--Kutta--Chebyshev method (RKC1)
      *        with a number of stages selected dynamically at run time.
      *
-     * The spectral radius is supplied by the caller. No power iteration is
-     * performed inside the method.
+     * The spectral radius is supplied by the caller through a callable, using
+     * the same interface as ROCK2. No power iteration is performed internally
+     * unless the caller explicitly provides such a spectral-radius estimator.
      */
-    template <typename _value_t = double>
+    template <typename eig_computer_t, typename _value_t = double>
     struct explicit_rkc1
     {
         static constexpr bool is_embedded      = false;
@@ -523,48 +528,32 @@ namespace ponio::runge_kutta::chebyshev
 
         using value_t = _value_t;
 
-        static constexpr value_t default_eps = static_cast<value_t>( 0.05 );
+        static constexpr value_t default_eps = rkc1_default_eps<value_t>;
 
         iteration_info<explicit_rkc1> _info;
 
-        value_t rho;
+        eig_computer_t eig_computer;
         value_t eps;
 
-        explicit explicit_rkc1( value_t spectral_radius, value_t damping = default_eps )
+        explicit explicit_rkc1( eig_computer_t&& _eig_computer, value_t damping = default_eps )
             : _info()
-            , rho( spectral_radius )
+            , eig_computer( std::forward<eig_computer_t>( _eig_computer ) )
             , eps( damping )
         {
-            if ( rho < static_cast<value_t>( 0. ) )
-            {
-                throw std::invalid_argument( "RKC1: spectral radius must be non-negative." );
-            }
             if ( eps < static_cast<value_t>( 0. ) || rkc_detail::beta( eps ) <= static_cast<value_t>( 0. ) )
             {
                 throw std::invalid_argument( "RKC1: damping parameter eps must be non-negative and satisfy 2 - 4 eps / 3 > 0." );
             }
         }
 
-        void
-        set_spectral_radius( value_t spectral_radius )
+        std::size_t
+        required_stages( value_t dt, value_t spectral_radius ) const
         {
             if ( spectral_radius < static_cast<value_t>( 0. ) )
             {
                 throw std::invalid_argument( "RKC1: spectral radius must be non-negative." );
             }
-            rho = spectral_radius;
-        }
-
-        std::size_t
-        required_stages( value_t dt ) const
-        {
-            return rkc_detail::dynamic_rkc1_stages( dt, rho, eps );
-        }
-
-        std::size_t
-        last_number_of_stages() const
-        {
-            return _info.number_of_stages;
+            return rkc_detail::dynamic_rkc1_stages( dt, spectral_radius, eps );
         }
 
         template <typename problem_t, typename state_t, typename array_ki_t>
@@ -573,10 +562,18 @@ namespace ponio::runge_kutta::chebyshev
         {
             _info.reset_eval();
 
-            std::size_t const m = required_stages( dt );
+            std::size_t n_eval = 0;
+            auto f_counter     = [&n_eval, &f]( value_t t, state_t& u, state_t& du )
+            {
+                ++n_eval;
+                f( t, u, du );
+            };
+
+            value_t const spectral_radius = eig_computer( f_counter, tn, un, dt, K );
+            std::size_t const m           = required_stages( dt, spectral_radius );
 
             _info.number_of_stages = m;
-            _info.number_of_eval   = m;
+            _info.number_of_eval   = n_eval + m;
 
             rkc_detail::rkc1_step( f, tn, un, dt, m, eps, K[0], K[1], K[2], K[3], unp1 );
 
@@ -596,11 +593,11 @@ namespace ponio::runge_kutta::chebyshev
         }
     };
 
-    template <typename value_t = double>
+    template <typename value_t = double, typename eig_computer_t>
     auto
-    rkc1( value_t spectral_radius, value_t eps = explicit_rkc1<value_t>::default_eps )
+    rkc1( eig_computer_t&& eig_computer, value_t eps = rkc1_default_eps<value_t> )
     {
-        return explicit_rkc1<value_t>( spectral_radius, eps );
+        return explicit_rkc1<eig_computer_t, value_t>( std::forward<eig_computer_t>( eig_computer ), eps );
     }
 
 } // namespace ponio::runge_kutta::chebyshev

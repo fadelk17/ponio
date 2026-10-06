@@ -77,12 +77,12 @@ main()
     auto const u_exact                    = heat_model::fundamental_solution( t_end, x );
     ponio::time_span<double> const t_span = { t_ini, t_end };
 
-    auto const u_rkc = ponio::solve( problem, ponio::runge_kutta::chebyshev::rkc1( rho ), u_ini, t_span, dt, ponio::observer::null_observer() );
-
     auto eigmax = [rho]( auto&&, double, auto&, double, auto& )
     {
         return rho;
     };
+
+    auto const u_rkc = ponio::solve( problem, ponio::runge_kutta::chebyshev::rkc1( eigmax ), u_ini, t_span, dt, ponio::observer::null_observer() );
 
     auto const u_rock = ponio::solve( problem, ponio::runge_kutta::rock::rock2( eigmax ), u_ini, t_span, dt, ponio::observer::null_observer() );
 
