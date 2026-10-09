@@ -9,13 +9,11 @@
 // NOLINTBEGIN(misc-include-cleaner)
 
 #include <algorithm>
-#include <array>
 #include <cmath>
 #include <concepts>
 #include <cstddef>
 #include <numbers>
 #include <string_view>
-#include <tuple>
 #include <type_traits>
 #include <utility>
 
@@ -59,12 +57,8 @@ namespace ponio::runge_kutta::pirkl
         //   6     : second-order RKL2 diffusion closure
         //   7..9  : advection evaluations
         //   10..12: DA coupling stages sp3, sp4, sp5
-        //   13    : generic increment / temporary error vector
-        //   14    : local branch-filter compensation (reset every attempted step)
-        //   15    : persistent solution compensation
-        //   16    : temporary state for compensated summation
-        static constexpr std::size_t N_storage                                 = 17;
-        static constexpr std::array<std::size_t, 1> persistent_storage_indices = { N_storage - 2 };
+        //   13    : temporary error vector
+        static constexpr std::size_t N_storage = 14;
 
         static constexpr std::size_t order   = 2;
         static constexpr std::string_view id = "PIRKL-D";
@@ -74,9 +68,6 @@ namespace ponio::runge_kutta::pirkl
 
         eig_computer_t eig_computer;
         iteration_info<pirkl_DA_impl> _info;
-
-        bool compensated_summation_initialized = false;
-        value_t time_compensation              = static_cast<value_t>( 0. );
 
         // Adaptive time-step controller.
         value_t facmax                 = static_cast<value_t>( 5. );
@@ -122,23 +113,20 @@ namespace ponio::runge_kutta::pirkl
             using diffusion_op = std::integral_constant<std::size_t, 0>;
             using advection_op = std::integral_constant<std::size_t, 1>;
 
-            auto& y_j              = U[0];
-            auto& y_jm1            = U[1];
-            auto& y_jm2            = U[2];
-            auto& fd_tmp           = U[3];
-            auto& fd_start         = U[4];
-            auto& K                = U[5];
-            auto& u_diff           = U[6];
-            auto& fa_K             = U[7];
-            auto& fa_tmp           = U[8];
-            auto& fa_tmp_bis       = U[9];
-            auto& u_sp3            = U[10];
-            auto& u_sp4            = U[11];
-            auto& u_sp5            = U[12];
-            auto& increment        = U[13];
-            auto& branch_comp      = U[14];
-            auto& compensation     = U[N_storage - 2];
-            auto& compensation_tmp = U[N_storage - 1];
+            auto& y_j        = U[0];
+            auto& y_jm1      = U[1];
+            auto& y_jm2      = U[2];
+            auto& fd_tmp     = U[3];
+            auto& fd_start   = U[4];
+            auto& K          = U[5];
+            auto& u_diff     = U[6];
+            auto& fa_K       = U[7];
+            auto& fa_tmp     = U[8];
+            auto& fa_tmp_bis = U[9];
+            auto& u_sp3      = U[10];
+            auto& u_sp4      = U[11];
+            auto& u_sp5      = U[12];
+            auto& error_tmp  = U[13];
 
             _info.reset_eval();
 
@@ -187,49 +175,6 @@ namespace ponio::runge_kutta::pirkl
             value_t const t_advection_K        = tn;
             value_t const t_advection_sp4      = tn + dt / static_cast<value_t>( 3. );
             value_t const t_advection_sp5      = tn + static_cast<value_t>( 2. ) * dt / static_cast<value_t>( 3. );
-
-            if ( !compensated_summation_initialized )
-            {
-                compensation = un;
-                compensation *= value_t( 0 );
-                compensated_summation_initialized = true;
-            }
-
-            auto compensated_update = [&]( state_t& state, auto const& state_increment )
-            {
-                compensation += state_increment;
-                compensation_tmp = state;
-                state            = state + compensation;
-                compensation += compensation_tmp - state;
-            };
-
-            auto compensated_commit = [&]( state_t const& state, state_t& result )
-            {
-                compensation_tmp = state;
-                result           = state + compensation;
-                compensation += compensation_tmp - result;
-            };
-
-            // The branch starts from u^n and uses a local compensation. The
-            // persistent compensation is reserved for the solution update.
-            branch_comp = un;
-            branch_comp *= value_t( 0 );
-
-            auto branch_compensated_update = [&]( state_t& state, auto const& state_increment )
-            {
-                branch_comp += state_increment;
-                compensation_tmp = state;
-                state            = state + branch_comp;
-                branch_comp += compensation_tmp - state;
-            };
-
-            auto compensated_time_update = [&]( value_t time_increment )
-            {
-                value_t const previous_time = tn;
-                time_compensation += time_increment;
-                tn = tn + time_compensation;
-                time_compensation += previous_time - tn;
-            };
 
             // Adaptive controller.
             auto raw_fac_from_current_error = [&]() -> value_t
@@ -303,104 +248,12 @@ namespace ponio::runge_kutta::pirkl
             // -----------------------------------------------------------------
             auto const branch_parameters = legendre::dynamic::make_legendre_filter_parameters<value_t>( s_branch, last_dimensioning.delta );
 
-            y_jm2     = un;
-            y_jm1     = un;
-            increment = ( branch_parameters.w1 / branch_parameters.w0 ) * dt * fd_start;
-            branch_compensated_update( y_jm1, increment );
-
-            if ( s_branch == 1 )
-            {
-                K = y_jm1;
-            }
-            else
-            {
-                value_t c_jm2 = static_cast<value_t>( 1. );
-                value_t c_jm1 = branch_parameters.w0;
-
-                for ( std::size_t j = 2; j <= s_branch; ++j )
-                {
-                    value_t const jv  = static_cast<value_t>( j );
-                    value_t const c_j = ( static_cast<value_t>( 2 * j - 1 ) * branch_parameters.w0 * c_jm1
-                                            - static_cast<value_t>( j - 1 ) * c_jm2 )
-                                      / jv;
-
-                    auto const coeff = legendre::dynamic::make_legendre_filter_stage_coefficients<value_t>( j,
-                        branch_parameters.w0,
-                        branch_parameters.w1,
-                        c_jm2,
-                        c_jm1,
-                        c_j );
-
-                    eval_diffusion( tn, y_jm1, fd_tmp );
-
-                    // mu_j + nu_j = 1, so write the recurrence in incremental
-                    // form to use the same compensated-update mechanism as PIROCK.
-                    increment = static_cast<state_t>( y_jm2 - y_jm1 );
-                    increment *= coeff.nu;
-                    increment += coeff.mu_t * dt * fd_tmp;
-
-                    y_j = y_jm1;
-                    branch_compensated_update( y_j, increment );
-
-                    if ( j < s_branch )
-                    {
-                        std::swap( y_jm2, y_jm1 );
-                        std::swap( y_jm1, y_j );
-                    }
-
-                    c_jm2 = c_jm1;
-                    c_jm1 = c_j;
-                }
-
-                K = y_j;
-            }
+            legendre::dynamic::apply_legendre_filter( eval_diffusion, tn, un, dt, branch_parameters, fd_start, y_jm2, y_jm1, y_j, fd_tmp, K );
 
             // -----------------------------------------------------------------
             // 2. Independent dynamic RKL2 closure: u_diff.
             // -----------------------------------------------------------------
-            legendre::dynamic::rkl2_coefficients<value_t> const rkl2_coeff( s_closure );
-
-            y_jm2     = un;
-            y_jm1     = un;
-            increment = rkl2_coeff.mu_t( 1 ) * dt * fd_start;
-            compensated_update( y_jm1, increment );
-
-            for ( std::size_t j = 2; j <= s_closure; ++j )
-            {
-                eval_diffusion( tn, y_jm1, fd_tmp );
-
-                value_t const mu      = rkl2_coeff.mu( j );
-                value_t const nu      = rkl2_coeff.nu( j );
-                value_t const mu_t    = rkl2_coeff.mu_t( j );
-                value_t const gamma_t = rkl2_coeff.gamma_t( j );
-                value_t const a0      = static_cast<value_t>( 1. ) - mu - nu;
-
-                // Incremental form of the RKL2 recurrence:
-                // Y_j = Y_{j-1}
-                //     + nu_j (Y_{j-2}-Y_{j-1})
-                //     + (1-mu_j-nu_j)(u_n-Y_{j-1})
-                //     + mu~_j dt F_D(Y_{j-1})
-                //     + gamma~_j dt F_D(u_n).
-                increment = static_cast<state_t>( y_jm2 - y_jm1 );
-                increment *= nu;
-
-                y_j = static_cast<state_t>( un - y_jm1 );
-                y_j *= a0;
-                increment += y_j;
-                increment += mu_t * dt * fd_tmp;
-                increment += gamma_t * dt * fd_start;
-
-                y_j = y_jm1;
-                compensated_update( y_j, increment );
-
-                if ( j < s_closure )
-                {
-                    std::swap( y_jm2, y_jm1 );
-                    std::swap( y_jm1, y_j );
-                }
-            }
-
-            u_diff = y_j;
+            legendre::dynamic::apply_rkl2( eval_diffusion, tn, un, dt, s_closure, fd_start, y_jm2, y_jm1, y_j, fd_tmp, u_diff );
 
             value_t err_D_scalar = static_cast<value_t>( 0. );
 
@@ -410,7 +263,7 @@ namespace ponio::runge_kutta::pirkl
                 // estimator is not available yet.
                 eval_diffusion( tn + dt, u_diff, fd_tmp );
 
-                auto& err_D = increment;
+                auto& err_D = error_tmp;
                 legendre::dynamic::approximate_rkl2_diffusion_error<state_t, value_t>( fd_start, fd_tmp, dt, err_D );
 
                 err_D_scalar = normalized_error_squared( err_D, un, u_diff );
@@ -451,10 +304,9 @@ namespace ponio::runge_kutta::pirkl
             eval_diffusion( t_diffusion_coupling, u_sp3, y_j );
             y_j = static_cast<state_t>( y_j - fd_tmp );
 
-            compensation += static_cast<value_t>( 0.25 ) * dt * fa_K;
-            compensation += dt / ( static_cast<value_t>( 2. ) - static_cast<value_t>( 4. ) * gamma ) * y_j;
-            compensation += static_cast<value_t>( 0.75 ) * dt * fa_tmp_bis;
-            compensated_commit( u_diff, u_np1 );
+            u_np1 = u_diff + static_cast<value_t>( 0.25 ) * dt * fa_K
+                  + dt / ( static_cast<value_t>( 2. ) - static_cast<value_t>( 4. ) * gamma ) * y_j
+                  + static_cast<value_t>( 0.75 ) * dt * fa_tmp_bis;
 
             if constexpr ( is_embedded )
             {
@@ -487,7 +339,7 @@ namespace ponio::runge_kutta::pirkl
 
                 if ( _info.success )
                 {
-                    compensated_time_update( dt );
+                    tn += dt;
 
                     errp = _info.error;
                     hp   = dt;
@@ -511,7 +363,7 @@ namespace ponio::runge_kutta::pirkl
             }
             else
             {
-                compensated_time_update( dt );
+                tn += dt;
             }
         }
 
@@ -527,7 +379,13 @@ namespace ponio::runge_kutta::pirkl
             return _info;
         }
 
-        /** @brief Last PIRKL-D branch/closure dimensioning. */
+        /**
+         * @brief Last PIRKL-D dimensioning data.
+         *
+         * Exposes the effective stability range, damping parameter and branch/
+         * closure stage counts used during the last attempted step. This is
+         * useful for diagnostics, profiling and cost analysis.
+         */
         auto const&
         dimensioning() const
         {

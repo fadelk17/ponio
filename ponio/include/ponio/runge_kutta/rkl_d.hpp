@@ -246,21 +246,6 @@ namespace ponio::runge_kutta::legendre::dynamic
     }
 
     /**
-     * @brief Exact RKL2 real-axis stability length for s stages.
-     */
-    template <typename value_t = double>
-    value_t
-    rkl2_stability_interval( std::size_t s )
-    {
-        if ( s < 2 )
-        {
-            throw std::invalid_argument( "RKL2 requires at least two stages" );
-        }
-        value_t const sv = static_cast<value_t>( s );
-        return ( sv * sv + sv - static_cast<value_t>( 2 ) ) / static_cast<value_t>( 2 );
-    }
-
-    /**
      * @brief Smallest RKL2 stage number whose stability interval covers zmax.
      */
     template <typename value_t = double>
@@ -469,30 +454,28 @@ namespace ponio::runge_kutta::legendre::dynamic
     /**
      * @brief Apply RKL2 with a runtime number of stages.
      *
-     * The caller supplies the work arrays. evaluator(t, u, out) evaluates the
-     * diffusion operator into out.
+     * The caller supplies F_D(t_n,u_n) so PIRKL-D can share this evaluation
+     * with the damped Legendre branch. The remaining diffusion evaluations are
+     * performed through evaluator(t, u, out).
      */
     template <typename evaluator_t, typename state_t, typename value_t = double>
     void
     apply_rkl2( evaluator_t&& evaluator,
         value_t tn,
-        state_t& un,
+        state_t const& un,
         value_t dt,
         std::size_t stages,
+        state_t const& f_start,
         state_t& y_jm2,
         state_t& y_jm1,
         state_t& y_j,
-        state_t& dt_f0,
         state_t& f_tmp,
         state_t& out )
     {
         rkl2_coefficients<value_t> const coeff( stages );
 
-        evaluator( tn, un, f_tmp );
-        dt_f0 = dt * f_tmp;
-
         y_jm2 = un;
-        y_jm1 = un + coeff.mu_t( 1 ) * dt_f0;
+        y_jm1 = un + coeff.mu_t( 1 ) * dt * f_start;
 
         for ( std::size_t j = 2; j <= stages; ++j )
         {
@@ -503,7 +486,7 @@ namespace ponio::runge_kutta::legendre::dynamic
             value_t const mu_t    = coeff.mu_t( j );
             value_t const gamma_t = coeff.gamma_t( j );
 
-            y_j = mu * y_jm1 + nu * y_jm2 + ( static_cast<value_t>( 1 ) - mu - nu ) * un + mu_t * dt * f_tmp + gamma_t * dt_f0;
+            y_j = mu * y_jm1 + nu * y_jm2 + ( static_cast<value_t>( 1 ) - mu - nu ) * un + mu_t * dt * f_tmp + gamma_t * dt * f_start;
 
             if ( j < stages )
             {
@@ -518,16 +501,18 @@ namespace ponio::runge_kutta::legendre::dynamic
     /**
      * @brief Apply the damped Legendre branch filter of PIRKL-D.
      *
-     * The normalized Legendre coefficients c_j=L_j(w0) are generated on the
-     * fly. Only three state work arrays are needed.
+     * The caller supplies F_D(t_n,u_n) so PIRKL-D can share this evaluation
+     * with the RKL2 closure. The normalized Legendre coefficients c_j=L_j(w0)
+     * are generated on the fly and only three state work arrays are needed.
      */
     template <typename evaluator_t, typename state_t, typename value_t = double>
     void
     apply_legendre_filter( evaluator_t&& evaluator,
         value_t tn,
-        state_t& un,
+        state_t const& un,
         value_t dt,
         legendre_filter_parameters<value_t> const& params,
+        state_t const& f_start,
         state_t& y_jm2,
         state_t& y_jm1,
         state_t& y_j,
@@ -537,8 +522,7 @@ namespace ponio::runge_kutta::legendre::dynamic
         std::size_t const stages = params.stages;
 
         y_jm2 = un;
-        evaluator( tn, un, f_tmp );
-        y_jm1 = un + ( params.w1 / params.w0 ) * dt * f_tmp;
+        y_jm1 = un + ( params.w1 / params.w0 ) * dt * f_start;
 
         if ( stages == 1 )
         {
