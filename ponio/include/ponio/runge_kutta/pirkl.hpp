@@ -126,7 +126,6 @@ namespace ponio::runge_kutta::pirkl
             auto& u_sp3      = U[10];
             auto& u_sp4      = U[11];
             auto& u_sp5      = U[12];
-            auto& error_tmp  = U[13];
 
             _info.reset_eval();
 
@@ -263,7 +262,7 @@ namespace ponio::runge_kutta::pirkl
                 // estimator is not available yet.
                 eval_diffusion( tn + dt, u_diff, fd_tmp );
 
-                auto& err_D = error_tmp;
+                auto& err_D = U[13];
                 legendre::dynamic::approximate_rkl2_diffusion_error<state_t, value_t>( fd_start, fd_tmp, dt, err_D );
 
                 err_D_scalar = normalized_error_squared( err_D, un, u_diff );
@@ -434,8 +433,6 @@ namespace ponio::runge_kutta::pirkl
         }
     };
 
-    // cppcheck-suppress-begin unusedFunction
-
     /**
      * @brief Build a PIRKL-D method for diffusion-advection problems.
      *
@@ -447,7 +444,5 @@ namespace ponio::runge_kutta::pirkl
     {
         return pirkl_DA_impl<eig_computer_t, is_embedded, value_t>( std::forward<eig_computer_t>( eig_computer ) );
     }
-
-    // cppcheck-suppress-end unusedFunction
 
 } // namespace ponio::runge_kutta::pirkl

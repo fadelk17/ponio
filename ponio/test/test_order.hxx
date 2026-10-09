@@ -283,7 +283,7 @@ TEST_CASE( "order::legendre_runge_kutta" )
 
 TEST_CASE( "order::dynamic_legendre_runge_kutta" )
 {
-    auto error = []( double dt )
+    auto compute_error = []( double dt )
     {
         constexpr std::size_t stages = 5;
         constexpr double t_end       = 1.;
@@ -317,8 +317,8 @@ TEST_CASE( "order::dynamic_legendre_runge_kutta" )
         return std::abs( u - std::exp( -t_end ) );
     };
 
-    double const err_dt   = error( 1. / 20. );
-    double const err_dt_2 = error( 1. / 40. );
+    double const err_dt   = compute_error( 1. / 20. );
+    double const err_dt_2 = compute_error( 1. / 40. );
     double const order    = std::log2( err_dt / err_dt_2 );
 
     INFO( "test order of dynamic RKL2" );
@@ -338,7 +338,7 @@ TEST_CASE( "order::pirkl_DA" )
     constexpr double damping  = 11.;
     constexpr double t_end    = 1.;
 
-    auto error = [=]( double dt )
+    auto compute_error = [=]( double dt )
     {
         auto diffusion = [=]( double, state_t const& u, state_t& du )
         {
