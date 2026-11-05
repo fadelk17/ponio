@@ -538,7 +538,6 @@ namespace ponio::runge_kutta::pirock
             }
 
             u_sm2 = u_jm1;
-            t_sm2 = t_jm1;
 
             // for j=s-1, ..., s-2+l
             for ( std::size_t j = mdeg + 1; j < mdeg + l + 1; ++j )
