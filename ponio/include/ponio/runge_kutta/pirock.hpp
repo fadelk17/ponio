@@ -274,8 +274,6 @@ namespace ponio::runge_kutta::pirock
                 return previous_rejected;
             }
 
-          private:
-
             value_t maximum_factor = static_cast<value_t>( 5. );
             value_t damping_factor = static_cast<value_t>( 0.8 );
 
@@ -426,12 +424,12 @@ namespace ponio::runge_kutta::pirock
             // | 11    | u_sp3            | $u^{(s+3)}$ stage in PIROCK method                |
             // | 11    | rhs_sp2          | right-hand side to compute $u^{(s+2)}$ stage      |
             // | 12    | shampine_element | Shampine's trick temporary element                |
-            // | 13    | f_D_u            | $F_D(u^{(s+3)}) - F_D(u^{(s+1)})$ term             |
+            // | 13    | f_D_u            | $F_D(u^{(s+3)}) - F_D(u^{(s+1)})$ term            |
             // | 14    | u_tmp            | temporary value for compute Shampine's trick      |
             // | 15    | fd_tn_cache      | cached $F_D(t_n,u_n)$ across rejected retries     |
             // | 16    | rhs_R            | right-hand side to compute $err_R$ error term     |
             // | 17    | err_R            | $err_R$ error on reaction term                    |
-            // | last  | rock_increment    | transported ROCK increment; then $err_D$           |
+            // | last  | rock_increment   | transported ROCK increment; then $err_D$          |
             //
             // > if method is called as a constant time step method, only index from 0 to 11 are used
             // > in addition to the ROCK increment workspace
@@ -517,6 +515,7 @@ namespace ponio::runge_kutta::pirock
 
             value_t t_sm2 = tn;
 
+            // for j=2, ... , s-2
             for ( std::size_t j = 2; j < mdeg + 1; ++j )
             {
                 value_t const mu_j    = rock_coeff::recf[start_index + 2 * ( j - 2 )];
@@ -531,12 +530,6 @@ namespace ponio::runge_kutta::pirock
 
                 t_jm1 = alpha * dt * mu_j - nu_j * t_jm2 - kappa_j * t_jm3;
 
-                if ( j == mdeg )
-                {
-                    u_sm2 = u_j;
-                    t_sm2 = t_jm1;
-                }
-
                 std::swap( u_jm2, u_jm1 );
                 std::swap( u_jm1, u_j );
 
@@ -544,6 +537,10 @@ namespace ponio::runge_kutta::pirock
                 t_jm2 = t_jm1;
             }
 
+            u_sm2 = u_jm1;
+            t_sm2 = t_jm1;
+
+            // for j=s-1, ..., s-2+l
             for ( std::size_t j = mdeg + 1; j < mdeg + l + 1; ++j )
             {
                 value_t const mu_j    = rock_coeff::recf2[4 * ( deg_index - 1 ) + 2 * ( j - mdeg - 1 )];
@@ -898,7 +895,7 @@ namespace ponio::runge_kutta::pirock
                         dt = adaptive_controller.rejected_step( new_dt, tn );
                     }
                 }
-                else
+                else // ! is_embedded
                 {
                     // Reuse the reaction values produced by the implicit stages.
 
@@ -924,7 +921,7 @@ namespace ponio::runge_kutta::pirock
                     u_np1 = us_s + 0.5 * dt * fi_tmp + 0.5 * dt * f_tmp + dt / ( 2. - 4. * gamma ) * shampine_element;
                 }
             }
-            else
+            else // ! shampine_trick_enable
             {
                 auto& f_D_u = U[0]; // U[0] is free after the ROCK recurrence
 
